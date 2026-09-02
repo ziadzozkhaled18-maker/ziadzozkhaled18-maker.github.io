@@ -8,13 +8,20 @@
 <script>
 (function () {
   try {
-    // A hand-typed /x7k2 becomes /X7K2. A scanned QR never reaches this page.
+    // Runs only on 404.html, i.e. a URL that did not resolve. A scanned QR
+    // never lands here - this exists to rescue hand-typed URLs.
+    //
+    // Flat layout: the card page is /X7K2 (served from X7K2.html). So the
+    // canonical path has NO trailing slash. This fixes both wrong case
+    // (/x7k2) and a stray trailing slash (/X7K2/), and both together.
     var parts = location.pathname.split('/').filter(function (p) { return p.length > 0; });
     var seg = parts.length ? parts[parts.length - 1] : '';
+    if (parts.length !== 1) return;              // only a single top-level segment
     if (seg.length !== 4) return;
     if (!/^[0-9A-Za-z]{4}$/.test(seg)) return;
-    var up = seg.toUpperCase();
-    if (up !== seg) location.replace('/' + up + '/');
+    var target = '/' + seg.toUpperCase();
+    // Never redirect to where we already are: that would loop forever.
+    if (location.pathname !== target) location.replace(target);
   } catch (e) { /* fall through to the friendly page */ }
 })();
 </script>
