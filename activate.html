@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Activate a review card</title>
+<style>
+:root{color-scheme:light dark;--bg:#f5f6f8;--fg:#15171a;--card:#fff;--mut:#5b6068;
+--line:#dfe2e7;--ok:#0b7a3b;--bad:#b0241f;--warn:#8a5a00;--accent:#1a56db}
+@media(prefers-color-scheme:dark){:root{--bg:#131519;--fg:#e9eaec;--card:#1d2025;
+--mut:#9aa0a8;--line:#2e3238;--ok:#4ade80;--bad:#f87171;--warn:#fbbf24;--accent:#7aa2f7}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:14px}
+.w{max-width:34rem;margin:0 auto}
+h1{font-size:1.15rem;margin:0 0 2px}
+.sub{color:var(--mut);font-size:.86rem;margin:0 0 16px}
+section{background:var(--card);border:1px solid var(--line);border-radius:12px;
+padding:14px;margin-bottom:12px}
+h2{font-size:.82rem;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:0 0 10px}
+label{display:block;font-weight:600;font-size:.87rem;margin:10px 0 5px}
+label:first-of-type{margin-top:0}
+input,textarea{width:100%;padding:11px 12px;font-size:16px;border:1px solid var(--line);
+border-radius:9px;background:var(--bg);color:var(--fg);font-family:inherit}
+textarea{min-height:70px;resize:vertical}
+#code{text-transform:uppercase;letter-spacing:.2em;font:700 21px ui-monospace,Consolas,monospace}
+.out{margin-top:10px;padding:10px 12px;border-radius:9px;background:var(--bg);
+border:1px solid var(--line);display:none;font-size:.9rem;white-space:pre-wrap}
+.out.show{display:block}
+.ok{color:var(--ok);font-weight:600}.bad{color:var(--bad);font-weight:600}
+.warn{color:var(--warn);font-weight:600}
+button{width:100%;margin-top:12px;padding:14px 16px;font-size:16px;font-weight:700;border:0;
+border-radius:10px;background:var(--accent);color:#fff;cursor:pointer}
+button:disabled{opacity:.45}
+button.sec{background:transparent;color:var(--accent);border:1px solid var(--line);
+font-weight:600;padding:11px;font-size:15px}
+a{color:var(--accent)}
+details{margin-top:10px}summary{cursor:pointer;color:var(--mut);font-size:.86rem}
+ol{padding-left:1.15rem;font-size:.88rem;color:var(--mut)}li{margin:5px 0}
+code{background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:.1em .35em;
+font:12.5px ui-monospace,Consolas,monospace;word-break:break-all}
+.row{display:flex;gap:8px}.row button{flex:1}
+</style>
+</head>
+<body>
+<div class="w">
+<h1>Activate a review card</h1>
+<p class="sub">Paste the shop’s Google link, press Generate. Nothing else.</p>
+<section id="setupBox">
+<h2>One-time setup</h2>
+<div id="whoami" class="out"></div>
+<label for="token">GitHub access token</label>
+<input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_...">
+<div class="row">
+<button id="saveToken">Save token</button>
+<button id="forgetToken" class="sec">Forget</button>
+</div>
+<details>
+<summary>How do I get this token?</summary>
+<ol>
+<li>On GitHub open <b>Settings &rarr; Developer settings &rarr; Personal access tokens &rarr; Fine-grained tokens</b></li>
+<li>Press <b>Generate new token</b></li>
+<li><b>Repository access:</b> Only select repositories &rarr; pick <code>ziadzozkhaled18-maker.github.io</code></li>
+<li><b>Permissions:</b> Repository permissions &rarr; <b>Contents</b> &rarr; <b>Read and write</b>. Nothing else.</li>
+<li>Set an expiry, generate, copy it, paste it above.</li>
+</ol>
+<p class="sub">The token is stored only on this phone and is sent only to github.com. If you lose the phone, delete the token on GitHub and nothing else is at risk.</p>
+</details>
+</section>
+<section>
+<h2>The card</h2>
+<label for="code">Card code</label>
+<input id="code" maxlength="4" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="X7K2">
+<div id="codeOut" class="out"></div>
+<label for="link">Shop’s Google review link</label>
+<textarea id="link" autocomplete="off" spellcheck="false" placeholder="g.page/r/.../review"></textarea>
+<div id="linkOut" class="out"></div>
+<label for="biz">Shop name (for your records)</label>
+<input id="biz" autocomplete="off" placeholder="Cafe Masr">
+</section>
+<section>
+<button id="go" disabled>Generate</button>
+<div id="result" class="out"></div>
+</section>
+</div>
+<script>
+'use strict';
+// Google review-link normalisation. NO Node dependencies on purpose: this exact
+// file is embedded verbatim into the browser activation tool, so the phone and
+// the command line can never disagree about what a link means.
+
+function writeReviewUrl(placeId) {
+  return 'https://search.google.com/local/writereview?placeid=' + encodeURIComponent(placeId);
+}
+
+function isGoogleHost(host) {
+  return host === 'google.com' || host === 'maps.google.com' ||
+    /(^|\.)google\.(com?\.)?[a-z]{2,}$/.test(host);
+}
+
+// Returns { url, kind } - url is null when the input identifies a business but
+// cannot be converted safely. Never guesses.
+function normaliseReviewLink(input) {
+  if (!input) return null;
+  const raw = String(input).trim();
+  if (!raw) return null;
+
+  if (/^ChI[A-Za-z0-9_-]{10,}$/.test(raw)) {
+    return { url: writeReviewUrl(raw), kind: 'place-id', placeId: raw };
+  }
+
+  let u;
+  try {
+    u = new URL(/^https?:\/\//i.test(raw) ? raw : 'https://' + raw);
+  } catch (e) { return null; }
+  const host = u.hostname.toLowerCase().replace(/^www\./, '');
+
+  if (host === 'search.google.com' && u.pathname.indexOf('/local/writereview') !== -1) {
+    const pid = u.searchParams.get('placeid');
+    if (pid) return { url: writeReviewUrl(pid), kind: 'writereview', placeId: pid };
+  }
+
+  if (host === 'g.page') {
+    const m = u.pathname.match(/^\/r\/([A-Za-z0-9_-]+)\/review\/?$/);
+    if (m) return { url: 'https://g.page/r/' + m[1] + '/review', kind: 'g.page' };
+    const n = u.pathname.match(/^\/([A-Za-z0-9._-]+)\/?$/);
+    if (n && n[1] !== 'r') return { url: 'https://g.page/' + n[1] + '/review', kind: 'g.page-name' };
+  }
+
+  if (isGoogleHost(host)) {
+    const direct = u.searchParams.get('place_id') || u.searchParams.get('placeid');
+    if (direct && /^ChI/.test(direct)) {
+      return { url: writeReviewUrl(direct), kind: 'maps-place-id', placeId: direct };
+    }
+    let decoded = u.href;
+    try { decoded = decodeURIComponent(u.href); } catch (e) { /* keep raw */ }
+    const embedded = decoded.match(/place_id[:=]([A-Za-z0-9_-]{10,})/);
+    if (embedded) {
+      return { url: writeReviewUrl(embedded[1]), kind: 'maps-embedded-place-id', placeId: embedded[1] };
+    }
+    if (u.searchParams.get('cid')) return { url: null, kind: 'cid-unsupported' };
+    if (u.pathname.indexOf('/maps') === 0) return { url: null, kind: 'maps-no-id' };
+  }
+
+  if (host === 'maps.app.goo.gl' || host === 'goo.gl' || host === 'g.co') {
+    return { url: null, kind: 'needs-resolve', resolve: u.toString() };
+  }
+
+  return null;
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { normaliseReviewLink, writeReviewUrl, isGoogleHost };
+}
+
+'use strict';
+// The card page templates. SINGLE SOURCE OF TRUTH.
+//
+// Both the PC builder (04-build-site.js) and the phone activator use these, so
+// a card generated from a phone is byte-identical to one generated on the PC.
+// No Node dependencies: this file is also embedded into the browser tool.
+
+function escHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+const PAGE_STYLE = [
+  ':root{color-scheme:light dark}',
+  'body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f6f7f9;color:#1a1a1a;',
+  'font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:24px}',
+  '.c{max-width:26rem;text-align:center;background:#fff;padding:32px 26px;border-radius:16px;',
+  'box-shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.06)}',
+  'h1{font-size:1.25rem;margin:0 0 .5rem}p{margin:.5rem 0;color:#555}',
+  '.ar{direction:rtl;font-size:.95rem;color:#666;border-top:1px solid #eee;margin-top:1.25rem;padding-top:1rem}',
+  'code{background:#f0f1f3;padding:.15em .45em;border-radius:5px;font-size:.95em}',
+  '.s{font-size:2rem;letter-spacing:.1em}',
+  '@media (prefers-color-scheme:dark){body{background:#16181c;color:#e8e8e8}',
+  '.c{background:#22252b;box-shadow:none}p{color:#a9adb5}.ar{color:#9aa0a8;border-color:#31343b}',
+  'code{background:#2c3038}}'
+].join('\n');
+
+function shellPage(title, body, extraHead) {
+  return '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1">\n' +
+    '<meta name="robots" content="noindex">\n<title>' + escHtml(title) + '</title>\n' +
+    (extraHead || '') +
+    '<style>\n' + PAGE_STYLE + '\n</style>\n</head>\n<body>\n<div class="c">\n' + body +
+    '\n</div>\n</body>\n</html>\n';
+}
+
+// A live card. The target appears in the meta refresh (authoritative) and in one
+// visible fallback link; the embedded script re-syncs the link from the meta, so
+// hand-editing only the meta still leaves a working page.
+function redirectPage(code, target, redirectJs) {
+  return '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1">\n' +
+    '<meta name="robots" content="noindex">\n<title>Leave a Google review</title>\n' +
+    '<!-- Card ' + code + '. To re-point this card by hand, change the url= value\n' +
+    '     below. The link at the bottom fixes itself to match. -->\n' +
+    '<meta http-equiv="refresh" content="0; url=' + escHtml(target) + '">\n' +
+    // NOTE the escaped slash below. This file is itself embedded inside a
+    // script block in the phone tool, and a literal closing script tag - even
+    // one sitting in a comment - would end that block early and break the page.
+    // The escaped form still produces the correct tag in the output.
+    '<script>\n' + redirectJs + '<\/script>\n' +
+    '<style>body{margin:0;min-height:100vh;display:grid;place-items:center;' +
+    'font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;' +
+    'background:#f6f7f9;color:#555;text-align:center;padding:24px}</style>\n</head>\n<body>\n' +
+    '<p>Opening Google reviews&hellip;<br><a id="fallback" href="' + escHtml(target) +
+    '">Tap here if nothing happens</a></p>\n</body>\n</html>\n';
+}
+
+function pendingPage(code, support) {
+  return shellPage('Card not activated yet',
+    '<div class="s">&#11088;</div>\n<h1>This card is not set up yet</h1>\n' +
+    '<p>Card <code>' + escHtml(code) + '</code> has not been linked to a business.</p>\n' +
+    '<p>If you own this card, send us the code above and we will activate it.</p>\n' +
+    '<p>' + escHtml(support) + '</p>\n' +
+    '<div class="ar">هذه البطاقة لم يتم تفعيلها بعد. تواصل معنا وارسل الكود الموجود بالأعلى.</div>');
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { escHtml, PAGE_STYLE, shellPage, redirectPage, pendingPage };
+}
+
+var OWNER = "ziadzozkhaled18-maker";
+var REPO = "ziadzozkhaled18-maker.github.io";
+var SITE = "https://ziadzozkhaled18-maker.github.io";
+var CODES = ["2SV7","3PBZ","3RS4","4BGQ","5UD3","5ZUY","6JRZ","6KFM","6VW2","6Y3F","6Y5Q","7RSJ","7SAN","7UJT","8MKM","8PZT","8QXY","8SEP","9QD3","A4FK","A6VW","B6CZ","BCD2","BF4N","BN2V","C6SY","CY7V","FK7J","FXD2","GG6B","H9BG","HK5V","JZ62","KJU8","KXQ2","M5ZW","M9F5","PM75","PX9V","Q7AV","QBJ4","QE9P","S2FY","S2QH","TC8E","UN9A","WRT3","X9FX","YB2Q","YHA4"];
+var REDIRECT_JS = "(function () {\n  try {\n    var meta = document.querySelector('meta[http-equiv=\"refresh\"]');\n    if (!meta) return;\n    var content = meta.getAttribute('content') || '';\n    var at = content.indexOf('url=');\n    if (at < 0) return;\n    var target = content.slice(at + 4).trim();\n    // Deliberately no regex: only an exact https:// prefix is followed.\n    if (target.indexOf('https://') !== 0) return;\n\n    // Point the visible fallback link at the same place, so the address only\n    // ever has to be typed ONCE in this file. Fewer edits, fewer mistakes.\n    var link = document.getElementById('fallback');\n    if (link) link.setAttribute('href', target);\n\n    location.replace(target);\n  } catch (e) { /* the meta refresh already handles it */ }\n})();\n";
+var TOKEN_KEY = "grc_token";
+
+var HELP = {
+  "cid-unsupported": "This is a Google \"cid\" link and cannot be converted. Ask the owner for their \"Ask for reviews\" link (g.page/r/.../review).",
+  "maps-no-id": "This Maps link has no Place ID in it. Ask the owner for their \"Ask for reviews\" link.",
+  "needs-resolve": "Short links (maps.app.goo.gl) cannot be opened here. Open it in the browser first, wait for it to load, then paste the full address.",
+  "unknown": "Not a Google review link. Accepted: g.page/r/.../review, a Place ID starting ChI..., a writereview link, or a Maps link containing place_id."
+};
+
+function el(id){ return document.getElementById(id); }
+function show(node, cls, msg){
+  node.className = "out show";
+  var s = document.createElement("span");
+  s.className = cls; s.textContent = msg;
+  node.innerHTML = ""; node.appendChild(s);
+}
+function hide(node){ node.className = "out"; node.textContent = ""; }
+
+function getToken(){ try { return localStorage.getItem(TOKEN_KEY) || ""; } catch(e){ return ""; } }
+function setToken(v){ try { if(v) localStorage.setItem(TOKEN_KEY, v); else localStorage.removeItem(TOKEN_KEY); } catch(e){} }
+
+// UTF-8 safe base64 - the pages contain non-ASCII characters
+function b64(str){
+  var bytes = new TextEncoder().encode(str);
+  var bin = "";
+  for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+
+function gh(pathname, opts){
+  opts = opts || {};
+  var token = getToken();
+  if (!token) return Promise.reject(new Error("No token saved. Do the one-time setup first."));
+  var headers = { "Accept": "application/vnd.github+json", "Authorization": "Bearer " + token };
+  if (opts.body) headers["Content-Type"] = "application/json";
+  return fetch("https://api.github.com" + pathname, {
+    method: opts.method || "GET",
+    headers: headers,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+    cache: "no-store"
+  }).then(function(r){
+    return r.text().then(function(t){
+      var j = null; try { j = t ? JSON.parse(t) : null; } catch(e){}
+      if (!r.ok) {
+        var msg = (j && j.message) ? j.message : ("HTTP " + r.status);
+        if (r.status === 401) msg = "Token rejected by GitHub. It may be wrong or expired.";
+        if (r.status === 403) msg = "Token lacks permission. It needs Contents: Read and write on " + REPO + ".";
+        if (r.status === 404) msg = "Not found. Check the token can see " + OWNER + "/" + REPO + ".";
+        var e = new Error(msg); e.status = r.status; throw e;
+      }
+      return j;
+    });
+  });
+}
+
+var state = { code: null, url: null, kind: null };
+
+function checkCode(){
+  var v = el("code").value.toUpperCase().trim();
+  el("code").value = v;
+  state.code = null;
+  if (!v) { hide(el("codeOut")); return sync(); }
+  if (v.length < 4) { show(el("codeOut"), "bad", "Codes are 4 characters."); return sync(); }
+  if (CODES.indexOf(v) < 0) { show(el("codeOut"), "bad", "No card " + v + " in this batch."); return sync(); }
+  state.code = v;
+  show(el("codeOut"), "ok", "Card " + v + " found.");
+  sync();
+}
+
+function checkLink(){
+  var raw = el("link").value;
+  state.url = null; state.kind = null;
+  if (!raw.trim()) { hide(el("linkOut")); return sync(); }
+  var r = normaliseReviewLink(raw);
+  if (!r || !r.url) { show(el("linkOut"), "bad", HELP[r && r.kind] || HELP.unknown); return sync(); }
+  if (r.url.indexOf("https://") !== 0) { show(el("linkOut"), "bad", "Refusing a non-HTTPS link."); return sync(); }
+  state.url = r.url; state.kind = r.kind;
+  show(el("linkOut"), "ok", "Recognised (" + r.kind + ")");
+  sync();
+}
+
+function sync(){ el("go").disabled = !(state.code && state.url && getToken()); }
+
+function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+
+// Wait until the live card really redirects, so "done" means done.
+function waitLive(code, target, onTick){
+  var tries = 0;
+  function attempt(){
+    tries++;
+    return fetch(SITE + "/" + code + "?cb=" + Date.now(), { cache: "no-store" })
+      .then(function(r){ return r.text(); })
+      .then(function(t){
+        if (t.indexOf(target) > -1) return true;
+        if (tries >= 20) return false;
+        if (onTick) onTick(tries);
+        return sleep(6000).then(attempt);
+      })
+      .catch(function(){
+        if (tries >= 20) return false;
+        return sleep(6000).then(attempt);
+      });
+  }
+  return attempt();
+}
+
+function generate(){
+  var code = state.code, target = state.url;
+  var biz = el("biz").value.trim();
+  if (!code || !target) return;
+  el("go").disabled = true;
+  show(el("result"), "warn", "Reading the card file...");
+
+  var filePath = "/repos/" + OWNER + "/" + REPO + "/contents/" + code + ".html";
+  gh(filePath)
+    .then(function(meta){
+      var existing = "";
+      try { existing = decodeURIComponent(escape(atob((meta.content||"").replace(/\n/g, "")))); } catch(e){ existing = ""; }
+      var already = existing.indexOf("http-equiv=\"refresh\"") > -1;
+      if (already && existing.indexOf(target) < 0) {
+        var m = existing.match(/content="0; url=([^"]+)"/);
+        var cur = m ? m[1].replace(/&amp;/g, "&") : "another business";
+        if (!confirm("Card " + code + " is ALREADY sold and points to:\n\n" + cur +
+                     "\n\nChange it to the new link? The old shop stops receiving reviews.")) {
+          throw new Error("Cancelled - card left as it was.");
+        }
+      }
+      var html = redirectPage(code, target, REDIRECT_JS);
+      show(el("result"), "warn", "Saving to GitHub...");
+      return gh(filePath, {
+        method: "PUT",
+        body: {
+          message: "Activate " + code + (biz ? " for " + biz : ""),
+          content: b64(html),
+          sha: meta.sha
+        }
+      });
+    })
+    .then(function(){
+      show(el("result"), "warn", "Saved. Waiting for it to go live (up to 2 minutes)...");
+      return waitLive(code, target, function(n){
+        show(el("result"), "warn", "Saved. Waiting for it to go live... (" + (n * 6) + "s)");
+      });
+    })
+    .then(function(live){
+      if (live) {
+        el("result").className = "out show";
+        el("result").innerHTML = "";
+        var ok = document.createElement("div");
+        ok.className = "ok";
+        ok.textContent = "DONE - card " + code + " is live" + (biz ? " for " + biz : "") + ".";
+        var a = document.createElement("a");
+        a.href = SITE + "/" + code; a.target = "_blank";
+        a.textContent = "Open the card to test it";
+        var p = document.createElement("p"); p.appendChild(a);
+        el("result").appendChild(ok); el("result").appendChild(p);
+      } else {
+        show(el("result"), "warn", "Saved to GitHub, but it has not gone live yet. " +
+          "This is usually just slow. Wait a minute and open " + SITE + "/" + code + " to check.");
+      }
+    })
+    .catch(function(e){ show(el("result"), "bad", e.message || String(e)); })
+    .then(function(){ sync(); });
+}
+
+function refreshWho(){
+  if (!getToken()) { show(el("whoami"), "warn", "No token saved yet."); return; }
+  show(el("whoami"), "warn", "Checking token...");
+  gh("/user")
+    .then(function(u){ show(el("whoami"), "ok", "Connected as " + (u && u.login ? u.login : "?")); })
+    .catch(function(e){ show(el("whoami"), "bad", e.message); });
+  sync();
+}
+
+el("code").addEventListener("input", checkCode);
+el("link").addEventListener("input", checkLink);
+el("go").addEventListener("click", generate);
+el("saveToken").addEventListener("click", function(){
+  var v = el("token").value.trim();
+  if (!v) { show(el("whoami"), "bad", "Paste a token first."); return; }
+  setToken(v); el("token").value = "";
+  refreshWho();
+});
+el("forgetToken").addEventListener("click", function(){
+  setToken(""); el("token").value = "";
+  show(el("whoami"), "warn", "Token removed from this phone.");
+  sync();
+});
+refreshWho();
+sync();
+</script>
+</body>
+</html>
